@@ -2106,3 +2106,7 @@ func TestConcurrentSetDefaultValue(t *testing.T) {
 	tk.MustExec("show create table t")
 	tk.MustExec("insert into t value()")
 }
+
+func TestGB18030(t *testing.T) {
+
+}
