@@ -123,6 +123,7 @@ var (
 				"check-mb4-value-in-utf8":       "tidb_check_mb4_value_in_utf8",
 				"enable-collect-execution-info": "tidb_enable_collect_execution_info",
 				"max-server-connections":        "max_connections",
+				"max-server-user-connections":   "max_user_connections",
 				"run-ddl":                       "tidb_enable_ddl",
 			},
 		},
@@ -281,6 +282,7 @@ type Config struct {
 	EnableCollectExecutionInfo bool       `toml:"enable-collect-execution-info" json:"enable-collect-execution-info"`
 	Plugin                     Plugin     `toml:"plugin" json:"plugin"`
 	MaxServerConnections       uint32     `toml:"max-server-connections" json:"max-server-connections"`
+	MaxServerUserConnections   uint32     `toml:"max-server-user-connections" json:"max-server-user-connections"`
 	RunDDL                     bool       `toml:"run-ddl" json:"run-ddl"`
 	// TiDBMaxReuseChunk indicates max cached chunk num
 	TiDBMaxReuseChunk uint32 `toml:"tidb-max-reuse-chunk" json:"tidb-max-reuse-chunk"`
@@ -499,9 +501,11 @@ type Instance struct {
 	PluginDir                  string     `toml:"plugin_dir" json:"plugin_dir"`
 	PluginLoad                 string     `toml:"plugin_load" json:"plugin_load"`
 	// MaxConnections is the maximum permitted number of simultaneous client connections.
-	MaxConnections    uint32     `toml:"max_connections" json:"max_connections"`
-	TiDBEnableDDL     AtomicBool `toml:"tidb_enable_ddl" json:"tidb_enable_ddl"`
-	TiDBRCReadCheckTS bool       `toml:"tidb_rc_read_check_ts" json:"tidb_rc_read_check_ts"`
+	MaxConnections uint32 `toml:"max_connections" json:"max_connections"`
+	// MaxUserConnections is the maximum number of connections that a single user is allowed to initiate simultaneously
+	MaxUserConnections uint32     `toml:"max_user_connections" json:"max_user_connections"`
+	TiDBEnableDDL      AtomicBool `toml:"tidb_enable_ddl" json:"tidb_enable_ddl"`
+	TiDBRCReadCheckTS  bool       `toml:"tidb_rc_read_check_ts" json:"tidb_rc_read_check_ts"`
 }
 
 func (l *Log) getDisableTimestamp() bool {
@@ -859,6 +863,7 @@ var defaultConf = Config{
 	RepairMode:                   false,
 	RepairTableList:              []string{},
 	MaxServerConnections:         0,
+	MaxServerUserConnections:     0,
 	TxnLocalLatches:              defTiKVCfg.TxnLocalLatches,
 	GracefulWaitBeforeShutdown:   0,
 	ServerVersion:                "",
@@ -895,6 +900,7 @@ var defaultConf = Config{
 		PluginDir:                   "/data/deploy/plugin",
 		PluginLoad:                  "",
 		MaxConnections:              0,
+		MaxUserConnections:          0,
 		TiDBEnableDDL:               *NewAtomicBool(true),
 		TiDBRCReadCheckTS:           false,
 	},
@@ -1074,6 +1080,7 @@ var removedConfig = map[string]struct{}{
 	"performance.query-feedback-limit":       {},
 	"oom-use-tmp-storage":                    {}, // use tidb_enable_tmp_storage_on_oom
 	"max-server-connections":                 {}, // use sysvar max_connections
+	"max-server-user-connections":            {}, // use sysvar max_user_connections
 	"run-ddl":                                {}, // use sysvar tidb_enable_ddl
 	"instance.tidb_memory_usage_alarm_ratio": {}, // use sysvar tidb_memory_usage_alarm_ratio
 }

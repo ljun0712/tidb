@@ -597,6 +597,8 @@ func setGlobalVars() {
 					cfg.Instance.EnableCollectExecutionInfo.Store(cfg.EnableCollectExecutionInfo)
 				case "max-server-connections":
 					cfg.Instance.MaxConnections = cfg.MaxServerConnections
+				case "max-server-user-connections":
+					cfg.Instance.MaxUserConnections = cfg.MaxServerUserConnections
 				case "run-ddl":
 					cfg.Instance.TiDBEnableDDL.Store(cfg.RunDDL)
 				}

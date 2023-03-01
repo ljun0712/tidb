@@ -221,6 +221,14 @@ type clientConn struct {
 	ppEnabled bool
 }
 
+type userResourceLimits struct {
+	reset_utime   uint64
+	connections   int
+	conn_per_hour int32
+	updates       int32
+	questions     int32
+}
+
 func (cc *clientConn) getCtx() *TiDBContext {
 	cc.ctx.RLock()
 	defer cc.ctx.RUnlock()
@@ -338,6 +346,8 @@ func (cc *clientConn) handshake(ctx context.Context) error {
 }
 
 func (cc *clientConn) Close() error {
+	cc.decrement_user_connections_counter()
+
 	cc.server.rwlock.Lock()
 	delete(cc.server.clients, cc.connectionID)
 	connections := len(cc.server.clients)
@@ -366,6 +376,39 @@ func closeConn(cc *clientConn, connections int) error {
 func (cc *clientConn) closeWithoutLock() error {
 	delete(cc.server.clients, cc.connectionID)
 	return closeConn(cc, len(cc.server.clients))
+}
+
+func (cc *clientConn) increment_user_connections_counter() {
+	user := cc.ctx.GetSessionVars().User
+	targetUser := user.AuthUsername + user.AuthHostname
+
+	cc.server.rwlock.Lock()
+	_, ok := cc.server.userResource[targetUser]
+	if !ok {
+		userHost := &userResourceLimits{
+			connections: 0,
+		}
+		cc.server.userResource[targetUser] = userHost
+	}
+
+	cc.server.userResource[targetUser].connections++
+	cc.server.rwlock.Unlock()
+}
+
+func (cc *clientConn) decrement_user_connections_counter() {
+	user := cc.ctx.GetSessionVars().User
+
+	if user != nil {
+		targetUser := user.AuthUsername + user.AuthHostname
+
+		cc.server.rwlock.Lock()
+		_, ok := cc.server.userResource[targetUser]
+		if ok && cc.server.userResource[targetUser].connections > 0 {
+			cc.server.userResource[targetUser].connections--
+		}
+
+		cc.server.rwlock.Unlock()
+	}
 }
 
 // writeInitialHandshake sends server version, connection ID, server capability, collation, server status
@@ -845,6 +888,11 @@ func (cc *clientConn) openSessionAndDoAuth(authData []byte, authPlugin string) e
 	}
 
 	host, port, err := cc.PeerHost(hasPassword, false)
+	if err != nil {
+		return err
+	}
+
+	err = cc.server.checkUserConnectionCount(cc, host)
 	if err != nil {
 		return err
 	}

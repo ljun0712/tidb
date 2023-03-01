@@ -37,6 +37,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http" //nolint:goimports
+
 	// For pprof
 	_ "net/http/pprof" // #nosec G108
 	"os"
@@ -62,6 +63,7 @@ import (
 	"github.com/pingcap/tidb/parser/terror"
 	"github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/plugin"
+	"github.com/pingcap/tidb/privilege"
 	"github.com/pingcap/tidb/privilege/privileges"
 	"github.com/pingcap/tidb/session"
 	"github.com/pingcap/tidb/session/txninfo"
@@ -106,6 +108,7 @@ var (
 	errAccessDenied            = dbterror.ClassServer.NewStd(errno.ErrAccessDenied)
 	errAccessDeniedNoPassword  = dbterror.ClassServer.NewStd(errno.ErrAccessDeniedNoPassword)
 	errConCount                = dbterror.ClassServer.NewStd(errno.ErrConCount)
+	errTooManyUserConnections  = dbterror.ClassServer.NewStd(errno.ErrTooManyUserConnections)
 	errSecureTransportRequired = dbterror.ClassServer.NewStd(errno.ErrSecureTransportRequired)
 	errMultiStatementDisabled  = dbterror.ClassServer.NewStd(errno.ErrMultiStatementDisabled)
 	errNewAbortingConnection   = dbterror.ClassServer.NewStd(errno.ErrNewAbortingConnection)
@@ -132,6 +135,7 @@ type Server struct {
 	rwlock            sync.RWMutex
 	concurrentLimiter *TokenLimiter
 	clients           map[uint64]*clientConn
+	userResource      map[string]*userResourceLimits
 	capability        uint32
 	dom               *domain.Domain
 	globalConnID      util.GlobalConnID
@@ -205,6 +209,7 @@ func NewServer(cfg *config.Config, driver IDriver) (*Server, error) {
 		driver:            driver,
 		concurrentLimiter: NewTokenLimiter(cfg.TokenLimit),
 		clients:           make(map[uint64]*clientConn),
+		userResource:      make(map[string]*userResourceLimits),
 		globalConnID:      util.NewGlobalConnID(0, true),
 		internalSessions:  make(map[interface{}]struct{}, 100),
 	}
@@ -381,6 +386,7 @@ func setTxnScope() {
 func (s *Server) reportConfig() {
 	metrics.ConfigStatus.WithLabelValues("token-limit").Set(float64(s.cfg.TokenLimit))
 	metrics.ConfigStatus.WithLabelValues("max_connections").Set(float64(s.cfg.Instance.MaxConnections))
+	metrics.ConfigStatus.WithLabelValues("max_user_connections").Set(float64(s.cfg.Instance.MaxUserConnections))
 }
 
 // Run runs the server.
@@ -622,6 +628,9 @@ func (s *Server) onConn(conn *clientConn) {
 		terror.Log(conn.Close())
 		logutil.Logger(ctx).Debug("connection closed")
 	}()
+
+	conn.increment_user_connections_counter()
+
 	s.rwlock.Lock()
 	s.clients[conn.connectionID] = conn
 	connections := len(s.clients)
@@ -703,6 +712,47 @@ func (s *Server) checkConnectionCount() error {
 			zap.Uint32("max connections", s.cfg.Instance.MaxConnections), zap.Error(errConCount))
 		return errConCount
 	}
+	return nil
+}
+
+func (s *Server) checkUserConnectionCount(cc *clientConn, host string) error {
+	authUser, err := cc.ctx.MatchIdentity(cc.user, host)
+	if err != nil {
+		return err
+	}
+
+	pm := privilege.GetPrivilegeManager(cc.ctx.Session)
+	connections, err := pm.GetUserResources(authUser.Username, authUser.Hostname)
+	if err != nil {
+		return err
+	}
+
+	if connections == 0 && int(s.cfg.Instance.MaxUserConnections) == 0 {
+		return nil
+	}
+
+	targetUser := authUser.Username + authUser.Hostname
+	conns := int64(0)
+
+	s.rwlock.RLock()
+	_, ok := s.userResource[targetUser]
+	if ok {
+		conns = int64(s.userResource[targetUser].connections)
+	}
+	s.rwlock.RUnlock()
+
+	if (connections > 0 && conns >= connections) || (connections == 0 && conns >= int64(s.cfg.Instance.MaxUserConnections)) {
+		var count uint32
+		if connections > 0 {
+			count = uint32(connections)
+		} else {
+			count = s.cfg.Instance.MaxUserConnections
+		}
+		logutil.BgLogger().Error("The current user has too many connections",
+			zap.Uint32("max user connections", count), zap.Error(errConCount))
+		return errTooManyUserConnections.GenWithStackByArgs(authUser.Username)
+	}
+
 	return nil
 }
 

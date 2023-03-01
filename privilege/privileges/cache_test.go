@@ -426,6 +426,7 @@ func TestAbnormalMySQLTable(t *testing.T) {
   password_expired		ENUM('N','Y') CHARACTER SET utf8 NOT NULL DEFAULT 'N',
   password_last_changed	TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
   password_lifetime		SMALLINT UNSIGNED,
+  Max_user_connections	SMALLINT UNSIGNED,
   PRIMARY KEY (Host,User)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_bin COMMENT='Users and global privileges';`)
 	tk.MustExec(`INSERT INTO user VALUES ('localhost','root','','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','Y','','','','',0,0,0,0,'mysql_native_password','', '', 'null', 'N', current_timestamp(), null);

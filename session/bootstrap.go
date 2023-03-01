@@ -110,6 +110,7 @@ const (
 		Password_expired		ENUM('N','Y') NOT NULL DEFAULT 'N',
 		Password_last_changed	TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
 		Password_lifetime		SMALLINT UNSIGNED DEFAULT NULL,
+		Max_user_connections	SMALLINT UNSIGNED DEFAULT 0,
 		PRIMARY KEY (Host, User));`
 	// CreateGlobalPrivTable is the SQL statement creates Global scope privilege table in system db.
 	CreateGlobalPrivTable = "CREATE TABLE IF NOT EXISTS mysql.global_priv (" +
@@ -738,11 +739,13 @@ const (
 	version109 = 109
 	// version110 sets tidb_server_memory_limit to "80%"
 	version110 = 110
+	// version112 add Max_user_connections into mysql.user.
+	version111 = 111
 )
 
 // currentBootstrapVersion is defined as a variable, so we can modify its value for testing.
 // please make sure this is the largest version
-var currentBootstrapVersion int64 = version110
+var currentBootstrapVersion int64 = version111
 
 // DDL owner key's expired time is ManagerSessionTTL seconds, we should wait the time and give more time to have a chance to finish it.
 var internalSQLTimeout = owner.ManagerSessionTTL + 15
@@ -860,6 +863,7 @@ var (
 		upgradeToVer108,
 		upgradeToVer109,
 		upgradeToVer110,
+		upgradeToVer111,
 	}
 )
 
@@ -2217,6 +2221,13 @@ func upgradeToVer110(s Session, ver int64) {
 	}
 	mustExecute(s, "UPDATE HIGH_PRIORITY %n.%n set VARIABLE_VALUE = %? where VARIABLE_NAME = %? and VARIABLE_VALUE = %?;",
 		mysql.SystemDB, mysql.GlobalVariablesTable, variable.DefTiDBServerMemoryLimit, variable.TiDBServerMemoryLimit, "0")
+}
+
+func upgradeToVer111(s Session, ver int64) {
+	if ver >= version111 {
+		return
+	}
+	doReentrantDDL(s, "ALTER TABLE mysql.user ADD COLUMN IF NOT EXISTS `Max_user_connections` SMALLINT UNSIGNED DEFAULT 0 AFTER `Password_lifetime`")
 }
 
 func writeOOMAction(s Session) {
